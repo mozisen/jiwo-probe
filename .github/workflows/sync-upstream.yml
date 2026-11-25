@@ -22,18 +22,19 @@ jobs:
     steps:
       - name: Check out user repository
         run: |
-          git clone --depth 50 "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+          git clone --branch "${GITHUB_REF_NAME}" --single-branch "https://github.com/${GITHUB_REPOSITORY}.git" repo
           cd repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Merge upstream updates
+        id: merge
         run: |
           cd repo
           git remote add upstream "https://github.com/chnnic/jiwo-probe.git"
-          git fetch --no-tags upstream main
+          git fetch --no-tags upstream main:refs/remotes/upstream/main
 
-          if git diff --quiet HEAD "upstream/main"; then
+          if git merge-base --is-ancestor upstream/main HEAD; then
             echo "Already up to date."
             exit 0
           fi
@@ -43,4 +44,17 @@ jobs:
             git diff --name-only --diff-filter=U
             exit 1
           }
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push upstream updates
+        if: steps.merge.outputs.updated == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          cd repo
+          : "${GITHUB_TOKEN:?GitHub Actions token is missing}"
+          # Keep the credential out of the remote URL and Git configuration.
+          git -c credential.helper= \
+            -c 'credential.helper=!f() { if [ "$1" = get ]; then printf "%s\n" "username=x-access-token" "password=$GITHUB_TOKEN"; fi; }; f' \
+            push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
